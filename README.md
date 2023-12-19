@@ -4,7 +4,7 @@ This module will do some intercept on your request. Then it will record the requ
 
 ## Installation
 
-This package use some dependencies.
+This package use some dependencies. Download all codes in this repository. Place it in `src` folder as you need
 
 ### Elasticsearch
 
