@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Catch,
   HttpException,
+  NotFoundException,
 } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -10,6 +11,8 @@ import { plainToInstance } from 'class-transformer';
 import { Request, Response } from 'express';
 import { ErrorLogDto } from '../dtos/error.log.dto';
 import { LOG_ERROR_EVENT } from '../constants/event.constant';
+import AppError from 'src/core/errors/app.error';
+import { addHours } from 'date-fns';
 
 /**
  * Class that provide log intercept incoming request.
@@ -39,23 +42,56 @@ export class ElasticlogException extends BaseExceptionFilter {
   }
 
   catch(exception: any, host: ArgumentsHost): void {
-    const request = host.switchToHttp().getRequest<Request>();
-    const response = host.switchToHttp().getResponse<Response>();
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request>();
+    const status = exception.getStatus();
 
-    const logData = {
-      timestamp: new Date().toISOString(),
-      request: request.url,
-      message: exception.message,
-      statusCode: exception.status,
-    };
+    let _message: string = "Exception happen, now i'm in panic";
+    let _details: any[] = [];
+    const _timestamp = addHours(new Date(), 7);
+    const _path = request.url;
 
     if (exception instanceof BadRequestException) {
-      logData.message = (exception.getResponse() as any).message;
+      _message = exception.message;
+      const _t = exception.getResponse() as {
+        message: string[];
+        error: string;
+        statusCode: number;
+      };
+      _details = _t.message;
     }
 
-    const res = plainToInstance(ErrorLogDto, logData);
+    if (exception instanceof NotFoundException) {
+      _message = exception.message;
+      const _error = exception.getResponse() as AppError;
+      if (exception.getResponse() instanceof AppError) {
+        const _errorDetails = _error.serializeErrors();
+        if (_errorDetails.suberrors.length !== 0) {
+          _errorDetails.suberrors.forEach((e) => {
+            if (e instanceof AppError) {
+              _details.push(e.message);
+            } else {
+              _details.push((e as Error).message);
+            }
+          });
+        }
+      }
+    }
+
+    const logData = {
+      message: _message,
+      details: _details,
+      timestamp: _timestamp,
+      path: _path,
+    };
+
+    const res = plainToInstance(ErrorLogDto, {
+      ...logData,
+      statusCode: status,
+    });
     this.event.emit(LOG_ERROR_EVENT, res);
 
-    response.status(exception.status).send(res);
+    response.status(status).send(logData);
   }
 }
